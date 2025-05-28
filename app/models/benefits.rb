@@ -2,12 +2,62 @@
 class Benefits < ApplicationRecord
 
 def self.save(file, backup = false)
-  # Store files outside web root for better security
-  data_path = Rails.root.join("storage", "uploads")
+  # Move storage outside of public web root
+  data_path = Rails.root.join("private", "secure_uploads")
+  FileUtils.mkdir_p(data_path) unless Dir.exist?(data_path)
   
-  # Create directory if it doesn't exist
-  FileUtils.mkdir_p(data_path) unless File.directory?(data_path)
+  # Check file size to prevent DoS attacks
+  max_size_mb = 10
+  if file.size > (max_size_mb * 1024 * 1024)
+    raise SecurityError, "File too large. Maximum size is #{max_size_mb}MB."
+  end
+def self.make_backup(file, data_path, full_file_name, safe_filename)
+  if File.exist?(full_file_name)
+    # Use UUID-based naming for backup files as well
+    backup_filename = "bak_#{Time.zone.now.to_i}_#{safe_filename}"
+    backup_path = File.join(data_path, backup_filename)
+    
+    # Use FileUtils instead of system command for safer file operations
+    FileUtils.cp(full_file_name, backup_path)
+    
+    # Log backup creation with sanitized information
+    Rails.logger.info("Created backup: #{backup_filename.gsub(/[^\w.-]/, '_')}")
+  end
+end
+
   
+  unless allowed_extensions.include?(extension)
+    raise SecurityError, "File type not allowed. Allowed types: #{allowed_extensions.join(', ')}"
+  end
+  
+  # Verify content type matches extension
+  content_type = file.content_type
+  valid_mime = MIME::Types.type_for(extension).any? { |mt| mt.content_type == content_type }
+  
+  unless valid_mime
+    raise SecurityError, "File content doesn't match its extension"
+  end
+  
+  # Generate UUID for filename to prevent predictable names and collisions
+  uuid = SecureRandom.uuid
+  safe_filename = "#{uuid}#{extension}"
+  full_file_name = File.join(data_path, safe_filename)
+  
+  # Store mapping in database (simplified here - in production would use a proper DB model)
+  @filename_mappings ||= null
+  @filename_mappings[safe_filename] = original_filename
+  
+  # Write the file
+  f = File.open(full_file_name, "wb+")
+  f.write file.read
+  f.close
+  
+  make_backup(file, data_path, full_file_name, safe_filename) if backup == "true"
+  
+  # Return the UUID filename for reference
+  safe_filename
+end
+
   # Content-type validation before processing the file
   allowed_types = ['image/jpeg', 'image/png', 'application/pdf']
   unless allowed_types.include?(file.content_type)
