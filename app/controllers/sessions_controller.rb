@@ -9,29 +9,89 @@ class SessionsController < ApplicationController
   end
 
 def create
-  # CSRF protection explicitly verified for authentication
-  verify_authenticity_token
+  path = params[:url].present? ? params[:url] : home_dashboard_index_path
   
-  # Sanitize and validate the redirect URL to prevent open redirects
-  path = if params[:url].present? && params[:url] =~ /\A\/[a-zA-Z0-9\/\-_]*\z/
-    params[:url]
-  else
-    home_dashboard_index_path
+  # Implement rate limiting before authentication
+  if exceeded_login_attempts?(params[:email].to_s.strip.downcase)
+    lock_account_temporarily(params[:email].to_s.strip.downcase)
+    flash[:error] = "Too many failed login attempts. Account temporarily locked."
+    return render "sessions/new", status: :too_many_requests
   end
-  
-  # Initialize error message variable outside exception block for proper scope
-  error_message = "Invalid email or password"
-  user = nil
   
   begin
     # Normalize the email address
     user = User.authenticate(params[:email].to_s.strip.downcase, params[:password])
   rescue RuntimeError => e
-    # Store error message but don't expose specific details
-    error_message = "Authentication failed"
-    # Log the real error securely
-    Rails.logger.error("Authentication error: #{e.message}")
+    # Properly log authentication failures with generic message to user
+    Rails.logger.warn "Authentication failure: #{e.message}"
+    record_failed_attempt(params[:email].to_s.strip.downcase)
   end
+
+  if user
+    # Rotate the auth token for enhanced security
+    user.rotate_auth_token if user.respond_to?(:rotate_auth_token)
+    
+# Secure logout implementation
+def destroy
+  if session_id = cookies[:session_id]
+    # Remove server-side session
+    Rails.cache.delete("user_session:#{session_id}")
+    
+    # Remove client-side cookie
+    cookies.delete(:session_id)
+  end
+  
+  # If user is found, invalidate their token as well
+  current_user.logout if current_user
+  
+  redirect_to login_path, notice: "You have been successfully logged out."
+end
+
+    context_fingerprint = generate_context_fingerprint(request)
+    hmac_data = "#{user.id}|#{expiry_time.to_i}|#{context_fingerprint}"
+    hmac_signature = OpenSSL::HMAC.hexdigest('SHA256', Rails.application.secrets.secret_key_base, hmac_data)
+    
+    # Store session data server-side
+    Rails.cache.write(
+      "user_session:#{session_id}", 
+      {
+        user_id: user.id,
+        expires_at: expiry_time,
+        hmac: hmac_signature,
+        context_fingerprint: context_fingerprint
+      },
+      expires_in: params[:remember_me] ? 30.days : 2.hours
+    )
+    
+    if params[:remember_me]
+      # Only store the reference ID in the cookie, not the actual credentials
+      cookies.permanent[:session_id] = {
+        value: session_id,
+        httponly: true,
+        secure: true,
+        same_site: :lax
+      }
+    else
+      # Set session reference with shorter expiry
+      cookies[:session_id] = {
+        value: session_id,
+        httponly: true,
+        secure: true,
+        same_site: :lax,
+        expires: 2.hours.from_now
+      }
+    end
+    
+    # Reset failed login attempts counter
+    reset_failed_attempts(params[:email].to_s.strip.downcase)
+    
+    redirect_to path
+  else
+    flash[:error] = "Invalid email or password. Please try again."
+    render "sessions/new"
+  end
+end
+
 
   if user
     # Track successful login for rate limiting purposes
