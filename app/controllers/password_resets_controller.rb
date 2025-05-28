@@ -2,18 +2,61 @@
 class PasswordResetsController < ApplicationController
   skip_before_action :authenticated
 
-  def reset_password
-    user = Marshal.load(Base64.decode64(params[:user])) unless params[:user].nil?
+def reset_password
+  # Add security headers for the response
+  response.headers['Cache-Control'] = 'no-store'
+  response.headers['Pragma'] = 'no-cache'
 
-    if user && params[:password] && params[:confirm_password] && params[:password] == params[:confirm_password]
+  begin
+    # Add anti-brute force rate limiting
+    if Rails.cache.read("password_reset_attempts:#{request.remote_ip}").to_i > 5
+      flash[:error] = "Too many attempts. Please try again later."
+      Rails.logger.warn("[SECURITY] Rate limit exceeded for password reset from #{request.remote_ip}")
+      redirect_to :login and return
+    end
+    Rails.cache.increment("password_reset_attempts:#{request.remote_ip}", 1, expires_in: 1.hour)
+
+    # Enhanced JWT verification with audience and issuer claims
+    payload = JWT.decode(params[:token], Rails.application.secrets.secret_key_base, true, 
+                        { algorithm: 'HS256', verify_expiration: true, 
+                          aud: "password_reset", iss: "your_application_name",
+                          verify_aud: true, verify_iss: true }).first
+    user = User.find_by(id: payload['user_id'])
+
+    if user && valid_password?(params[:password], params[:confirm_password])
       user.password = params[:password]
       user.save!
+      # Add audit logging for successful password reset
+      Rails.logger.info("[SECURITY] Password reset successful for user #{user.id}")
       flash[:success] = "Your password has been reset please login"
       redirect_to :login
     else
+      # Add audit logging for validation failure
+      Rails.logger.warn("[SECURITY] Password reset failed due to validation errors for token #{params[:token][0..5]}...")
       flash[:error] = "Error resetting your password. Please try again."
       redirect_to :login
     end
+  rescue JWT::DecodeError, JWT::ExpiredSignature, JWT::InvalidAudError, JWT::InvalidIssuerError
+    # Add audit logging for invalid token
+    Rails.logger.warn("[SECURITY] Failed password reset attempt with token #{params[:token][0..5]}...")
+    flash[:error] = "Invalid or expired reset token. Please request a new password reset."
+    redirect_to :login
+  rescue ActiveRecord::RecordNotFound
+    # Add audit logging for non-existent user
+    Rails.logger.warn("[SECURITY] Password reset attempt for non-existent user with token #{params[:token][0..5]}...")
+    flash[:error] = "User not found. Please request a new password reset."
+    redirect_to :login
+  end
+end
+
+# Added helper method for password complexity validation
+def valid_password?(password, confirmation)
+  return false unless password.present? && confirmation.present? && password == confirmation
+  return false unless password.length >= 8
+  return false unless password =~ /[A-Z]/ && password =~ /[0-9]/ && password =~ /[^A-Za-z0-9]/
+  true
+end
+
   end
 
   def confirm_token
