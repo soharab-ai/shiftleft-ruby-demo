@@ -38,10 +38,39 @@ def self.save(file, backup = false)
 end
 
 
-  def self.make_backup(file, data_path, full_file_name)
+def self.make_backup(file, data_path, full_file_name)
+  begin
     if File.exist?(full_file_name)
-      silence_streams(STDERR) { system("cp #{full_file_name} #{data_path}/bak#{Time.zone.now.to_i}_#{file.original_filename}") }
+      # Input validation - check if filename matches acceptable pattern
+      if file.original_filename.match?(/^[a-zA-Z0-9_\.\-]+$/)
+        # Sanitize filename to prevent directory traversal attacks
+        sanitized_filename = File.basename(file.original_filename).gsub(/[^0-9A-Za-z.\-]/, '_')
+        
+        # Create proper backup filename with sanitized input
+        backup_filename = File.join(data_path, "bak#{Time.zone.now.to_i}_#{sanitized_filename}")
+        
+        # Use FileUtils for direct file operations (no shell execution)
+        FileUtils.cp(full_file_name, backup_filename)
+        
+        # Apply restrictive permissions to the backup file
+        FileUtils.chmod(0600, backup_filename)
+        
+        return backup_filename
+      else
+        Rails.logger.error("Invalid filename format: #{file.original_filename}")
+        return nil
+      end
+    else
+      Rails.logger.error("Source file does not exist: #{full_file_name}")
+      return nil
     end
+  rescue => e
+    # Error handling for file operation failures
+    Rails.logger.error("Backup failed: #{e.message}")
+    return nil
+  end
+end
+
   end
 
   def self.silence_streams(*streams)
