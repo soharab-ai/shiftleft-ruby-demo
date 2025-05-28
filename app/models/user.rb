@@ -50,18 +50,39 @@ class User < ApplicationRecord
     return auth
   end
 
-  def hash_password
-    if will_save_change_to_password?
-      self.password = Digest::MD5.hexdigest(self.password)
+# Method to rotate authentication tokens for security
+def rotate_auth_token
+  # Implement token versioning for future security upgrades
+  self.auth_token = "v2:#{SecureRandom.urlsafe_base64(32)}"
+  self.token_created_at = Time.current
+  # Invalidate all existing sessions when token is rotated
+# Check if the current token is still valid based on age and context
+def token_valid?(request = nil)
+  return false unless token_created_at.present? && token_created_at > 12.hours.ago
+  
+  # If request context provided, validate it
+# Validate the request context matches what was stored during session creation
+def validate_request_context(request)
+  return true unless last_sign_in_ip.present?
+  
+  # Only check the first three octets of the IP to account for dynamic IPs
+  current_ip_prefix = request.remote_ip.to_s.split('.')[0..2].join('.')
+  stored_ip_prefix = last_sign_in_ip.to_s.split('.')[0..2].join('.')
+  
+# Securely terminate the user's authentication token
+def logout
+  self.auth_token = nil
+  self.token_created_at = nil
+  invalidate_all_sessions
+  save!
+end
+# Invalidate all active sessions for this user
+def invalidate_all_sessions
+  # Find all session keys for this user
+  session_keys = []
+  Rails.cache.instance_variable_get(:@data).keys.each do |key|
+    if key.to_s.start_with?("user_session:") && Rails.cache.read(key)&.dig(:user_id) == id
+      Rails.cache.delete(key)
     end
-  end
-
-  def generate_token(column)
-    loop do
-      self[column] = Encryption.encrypt_sensitive_value(self.id)
-      break unless User.exists?(column => self[column])
-    end
-
-    self.save!
   end
 end

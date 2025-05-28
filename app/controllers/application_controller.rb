@@ -15,20 +15,49 @@ class ApplicationController < ActionController::Base
     ActionMailer::Base.default_url_options[:host]     = request.host_with_port
   end
 
-  def current_user
-    @current_user ||= (
-      User.find_by(auth_token: cookies[:auth_token].to_s) ||
-      User.find_by(id: session[:user_id].to_s)
-    )
-  end
+def current_user
+  return @current_user if defined?(@current_user)
+  
+  # Use the session reference ID to retrieve server-side session data
+  if session_id = cookies[:session_id]
+    if session_data = Rails.cache.read("user_session:#{session_id}")
+      # Verify session hasn't expired
+      return nil if Time.current > session_data[:expires_at]
+# Generate a fingerprint based on request context for additional security
+def generate_context_fingerprint(request)
+  # Use a combination of IP and user agent, but don't include all details
+  # to allow for some flexibility with dynamic IPs/proxy changes
+  data_to_fingerprint = "#{request.remote_ip.to_s.split('.')[0..2].join('.')}"
+  data_to_fingerprint += "|#{request.user_agent.to_s[0..50]}" if request.user_agent
+  
+# Rate limiting implementation to prevent brute force attacks
+def exceeded_login_attempts?(email)
+  attempts_key = "login_attempts:#{email}"
+  attempts = Rails.cache.fetch(attempts_key, raw: true) { 0 }.to_i
+  
+  # Limit to 5 failed attempts within 15 minutes
+  attempts >= 5
+end
+# Record failed login attempts for rate limiting
+def record_failed_attempt(email)
+  attempts_key = "login_attempts:#{email}"
+  attempts = Rails.cache.fetch(attempts_key, raw: true) { 0 }.to_i
+  
+  # Increment and store with 15 minute expiration
+  Rails.cache.write(attempts_key, attempts + 1, expires_in: 15.minutes, raw: true)
+end
 
-  def authenticated
-     path = request.fullpath.present? ? root_url(url: request.fullpath) : root_url
-     redirect_to path and reset_session if !current_user
-  end
+# Reset failed login attempts counter after successful login
+def reset_failed_attempts(email)
+  Rails.cache.delete("login_attempts:#{email}")
+end
 
-  def is_admin?
-    current_user.admin if current_user
+# Lock account temporarily after too many failed attempts
+def lock_account_temporarily(email)
+  Rails.cache.write("account_locked:#{email}", true, expires_in: 30.minutes)
+  Rails.logger.warn "Account temporarily locked due to too many failed attempts: #{email}"
+end
+
   end
 
   def administrative
