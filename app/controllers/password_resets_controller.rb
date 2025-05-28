@@ -26,15 +26,19 @@ class PasswordResetsController < ApplicationController
     end
   end
 
-  def send_forgot_password
-    @user = User.find_by_email(params[:email]) unless params[:email].nil?
+def send_forgot_password
+  @user = User.find_by_email(params[:email]) unless params[:email].nil?
 
-    if @user && password_reset_mailer(@user)
-      flash[:success] = "Password reset email sent to #{params[:email]}"
-      redirect_to :login
-    else
-      flash[:error] = "There was an issue sending password reset email to #{params[:email]}".html_safe unless params[:email].nil?
-    end
+  if @user && password_reset_mailer(@user)
+    flash[:success] = "Password reset email sent to #{params[:email]}"
+    redirect_to :login
+  else
+    # Fixed XSS vulnerability by removing html_safe and explicitly escaping the email parameter
+    sanitized_email = ERB::Util.html_escape(params[:email]) if params[:email]
+    flash[:error] = "There was an issue sending password reset email to #{sanitized_email}" unless params[:email].nil?
+  end
+end
+
   end
 
   private
