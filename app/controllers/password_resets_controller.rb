@@ -26,15 +26,42 @@ class PasswordResetsController < ApplicationController
     end
   end
 
-  def send_forgot_password
-    @user = User.find_by_email(params[:email]) unless params[:email].nil?
-
+def send_forgot_password
+  email = params[:email]
+  # Sanitize the email parameter for display in all contexts
+  sanitized_email = email.present? ? sanitize(email) : nil
+  
+  # Validate email format before processing
+  if email.present? && valid_email_format?(email)
+    @user = User.find_by_email(email)
+    
     if @user && password_reset_mailer(@user)
-      flash[:success] = "Password reset email sent to #{params[:email]}"
+      # Use sanitized email in success message to prevent XSS
+      flash[:success] = "Password reset email sent to #{sanitized_email}"
       redirect_to :login
-    else
-      flash[:error] = "There was an issue sending password reset email to #{params[:email]}".html_safe unless params[:email].nil?
+      return
     end
+  end
+  
+  # Use sanitized email in error message if email was provided
+  if email.present?
+    flash[:error] = "There was an issue sending password reset email to #{sanitized_email}"
+  end
+end
+
+# Helper method to validate email format
+def valid_email_format?(email)
+  email =~ /\A[\w+\-.]+@[a-z\d\-.]+\.[a-z]+\z/i
+end
+
+# Helper method that combines multiple sanitization techniques for thorough protection
+def sanitize(content)
+  # First strip any HTML tags, then escape any remaining special characters
+  ActionController::Base.helpers.strip_tags(
+    ERB::Util.html_escape(content)
+  )
+end
+
   end
 
   private
