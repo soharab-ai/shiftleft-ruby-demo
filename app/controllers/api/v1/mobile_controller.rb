@@ -5,11 +5,33 @@ class Api::V1::MobileController < ApplicationController
 
   respond_to :json
 
-  def show
-    if params[:class]
-      model = params[:class].classify.constantize
-      respond_with model.find(params[:id]).to_json
-    end
+def show
+  # Direct mapping between route parameters and model classes to completely eliminate reflection
+  MODEL_MAP = {
+    "product" => Product,
+    "user" => User,
+    "order" => Order
+  }
+  
+  # Get the normalized class parameter
+  requested_class = params[:class]&.downcase
+  
+  if requested_class && MODEL_MAP.key?(requested_class)
+    # Use the direct class reference from our mapping instead of reflection
+    model = MODEL_MAP[requested_class]
+    
+    # Sanitize the ID parameter to prevent SQL injection
+    id = params[:id].to_i
+    
+    # Find the record using the sanitized ID
+    record = model.find(id)
+    respond_with record.to_json
+  else
+    # Reject invalid class parameters with a bad request error
+    render json: { error: "Invalid class parameter" }, status: :bad_request
+  end
+end
+
   end
 
   def index
