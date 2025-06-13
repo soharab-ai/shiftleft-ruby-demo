@@ -38,17 +38,26 @@ class User < ApplicationRecord
 
   private
 
-  def self.authenticate(email, password)
-    auth = nil
-    user = find_by_email(email)
-    raise "#{email} doesn't exist!" if !(user)
-    if user.password == Digest::MD5.hexdigest(password)
-      auth = user
-    else
-      raise "Incorrect Password!"
-    end
-    return auth
+def self.authenticate(email, password)
+  auth = nil
+  user = find_by_email(email.to_s)
+  raise "#{email} doesn't exist!" unless user
+  
+  # Using BCrypt for secure password comparison instead of MD5
+  if BCrypt::Password.new(user.password_digest) == password.to_s
+    auth = user
+  else
+    raise "Incorrect Password!"
   end
+  return auth
+end
+# Implement token rotation with creation timestamp
+def regenerate_auth_token
+  new_token = SecureRandom.urlsafe_base64(32)
+  update(auth_token: new_token, token_created_at: Time.current)
+  new_token
+end
+
 
   def hash_password
     if will_save_change_to_password?
