@@ -26,15 +26,29 @@ class PasswordResetsController < ApplicationController
     end
   end
 
-  def send_forgot_password
-    @user = User.find_by_email(params[:email]) unless params[:email].nil?
-
+def send_forgot_password
+  email = params[:email]
+  
+  # Added explicit email format validation
+  if email.present? && email.match?(/\A[^@\s]+@[^@\s]+\.[^@\s]+\z/)
+    @user = User.find_by_email(email)
+    
     if @user && password_reset_mailer(@user)
-      flash[:success] = "Password reset email sent to #{params[:email]}"
+      # Changed to generic message for security
+      flash[:success] = "If your email is registered, password reset instructions will be sent"
       redirect_to :login
     else
-      flash[:error] = "There was an issue sending password reset email to #{params[:email]}".html_safe unless params[:email].nil?
+      # Using same generic message regardless of whether email exists
+      flash[:notice] = "If your email is registered, password reset instructions will be sent"
+      redirect_to :login
     end
+  else
+    # Generic error for invalid email format
+    flash[:error] = "Invalid email format"
+    redirect_to :login
+  end
+end
+
   end
 
   private
