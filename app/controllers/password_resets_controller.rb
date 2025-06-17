@@ -2,18 +2,45 @@
 class PasswordResetsController < ApplicationController
   skip_before_action :authenticated
 
-  def reset_password
-    user = Marshal.load(Base64.decode64(params[:user])) unless params[:user].nil?
+def reset_password
+  # Implement rate limiting to prevent brute force attacks
+  if ResetAttempt.where(ip: request.remote_ip).where('created_at > ?', 1.hour.ago).count > 5
+    flash[:error] = "Too many attempts. Please try again later."
+    redirect_to :login and return
+  end
+  ResetAttempt.create(ip: request.remote_ip)
+  
+  # Use permitted parameters
+  reset_params = reset_password_params
+  
+  # Use hashed token in database lookup to prevent token leakage
+  token = reset_params[:token]
+  hashed_token = Digest::SHA256.hexdigest(token)
+  user = User.find_by(reset_token_hash: hashed_token)
+  
+  if user && user.reset_token_valid? && 
+     reset_params[:password].present? && 
+     reset_params[:confirm_password].present? && 
+     reset_params[:password] == reset_params[:confirm_password]
+    
+    user.update_password(reset_params[:password])
+    # Clear token after successful reset to prevent token reuse
+    user.clear_reset_token
+    flash[:success] = "Your password has been reset please login"
+    redirect_to :login
+  else
+    flash[:error] = "Error resetting your password. Please try again."
+    redirect_to :login
+  end
+end
 
-    if user && params[:password] && params[:confirm_password] && params[:password] == params[:confirm_password]
-      user.password = params[:password]
-      user.save!
-      flash[:success] = "Your password has been reset please login"
-      redirect_to :login
-    else
-      flash[:error] = "Error resetting your password. Please try again."
-      redirect_to :login
-    end
+private
+
+# Define strong parameters
+def reset_password_params
+  params.permit(:token, :password, :confirm_password)
+end
+
   end
 
   def confirm_token
