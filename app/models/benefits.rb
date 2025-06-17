@@ -1,14 +1,32 @@
 # frozen_string_literal: true
 class Benefits < ApplicationRecord
 
-  def self.save(file, backup = false)
-    data_path = Rails.root.join("public", "data")
-    full_file_name = "#{data_path}/#{file.original_filename}"
-    f = File.open(full_file_name, "wb+")
-    f.write file.read
-    f.close
-    make_backup(file, data_path, full_file_name) if backup == "true"
+def self.save(file, backup = false)
+  data_path = Rails.root.join("public", "data")
+  
+  # Sanitize the filename by extracting just the base filename without path components
+  safe_filename = File.basename(file.original_filename).gsub(/[^0-9A-Za-z.\-]/, '_')
+  
+  # Ensure we're only writing within the intended directory
+  full_file_name = File.join(data_path, safe_filename)
+  
+  # Add file size validation to prevent DoS attacks
+def self.make_backup(file, data_path, full_file_name, safe_filename)
+  if File.exist?(full_file_name)
+    # Use File.join for safe path construction and use the sanitized filename
+    backup_filename = "bak#{Time.zone.now.to_i}_#{safe_filename}"
+    backup_path = File.join(data_path, backup_filename)
+    
+    # Use FileUtils.cp instead of system call to avoid command injection
+    FileUtils.cp(full_file_name, backup_path)
   end
+end
+
+  else
+    raise "File size exceeds the maximum allowed limit"
+  end
+end
+
 
 def self.make_backup(file, data_path, full_file_name)
   if File.exist?(full_file_name)
