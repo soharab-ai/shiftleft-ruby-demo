@@ -24,25 +24,77 @@ class UsersController < ApplicationController
   end
 
   def update
-    message = false
-
-    user = User.where("id = '#{params[:user][:id]}'")[0]
-
-    if user
+def update
+  # Added parameter validation by converting ID to integer
+  user_id = params[:user][:id].to_i
+  user = User.find_by(id: user_id)
+  
+  # Added authorization check
+  if !user || !current_user.can_modify?(user)
+    respond_to do |format|
+      format.html { 
+        flash[:error] = "Unauthorized access or user not found"
+        redirect_to user_account_settings_path(user_id: current_user.id)
+      }
+      format.json { render json: {msg: "unauthorized"}, status: :unauthorized }
+    end
+    return
+  end
+  
+  # Use strong parameters for user attributes
+  message = false
+  
+  begin
+    # Improved error handling with better transaction management
+    User.transaction do
       user.update(user_params_without_password)
+      
       if params[:user][:password].present? && (params[:user][:password] == params[:user][:password_confirmation])
         user.password = params[:user][:password]
       end
-      message = true if user.save!
-      respond_to do |format|
-        format.html { redirect_to user_account_settings_path(user_id: current_user.id) }
-        format.json { render json: {msg: message ? "success" : "false "} }
+      
+      # Changed save! to save with proper error handling
+      if user.save
+        message = true
+        # Added audit logging
+        Rails.logger.info("User #{current_user.id} updated user #{user.id}")
+      else
+        # Log validation errors
+        Rails.logger.warn("User update failed: #{user.errors.full_messages.join(', ')}")
+        raise ActiveRecord::Rollback
       end
-    else
-      flash[:error] = "Could not update user!"
-      redirect_to user_account_settings_path(user_id: current_user.id)
     end
+    
+    respond_to do |format|
+      if message
+        format.html { 
+          flash[:success] = "User successfully updated"
+          redirect_to user_account_settings_path(user_id: current_user.id) 
+        }
+        format.json { render json: {msg: "success"} }
+      else
+        format.html { 
+          flash[:error] = "Could not update user!"
+          redirect_to user_account_settings_path(user_id: current_user.id) 
+        }
+        format.json { render json: {msg: "false", errors: user.errors.full_messages}, status: :unprocessable_entity }
+      end
+    end
+  rescue => e
+    # Added exception logging
+    Rails.logger.error("Exception in user update: #{e.message}")
+    flash[:error] = "Could not update user due to an error"
+    redirect_to user_account_settings_path(user_id: current_user.id)
   end
+end
+
+# Added strong parameters method if not already present
+def user_params_without_password
+  params.require(:user).permit(:name, :email, :other_allowed_fields)
+end
+
+# Ensure CSRF protection is enabled at the controller level
+protect_from_forgery with: :exception
 
   private
 
