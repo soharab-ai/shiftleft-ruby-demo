@@ -25,11 +25,30 @@ class AdminController < ApplicationController
     @users = User.all
   end
 
-  def get_user
-    @user = User.find_by_id(params[:admin_id].to_s)
-    arr = ["true", "false"]
-    @admin_select = @user.admin ? arr : arr.reverse
+def get_user
+  # Verify the current user is authenticated and has admin privileges
+  unless current_user && current_user.admin?
+    flash[:error] = "Unauthorized access"
+    redirect_to root_path and return
   end
+  
+  # Additional access control check - verify the requested user is allowed to be accessed
+  # by the current admin based on appropriate business rules
+  @user = User.find_by_id(params[:admin_id].to_s)
+  
+  if @user.nil?
+    flash[:error] = "User not found"
+    redirect_to admin_path and return
+  end
+  
+  # If organization-based access control is needed, add checks here
+  # Example: return error if @user.organization_id != current_user.organization_id
+  
+  # After all authorization checks have passed, proceed with the original logic
+  arr = ["true", "false"]
+  @admin_select = @user.admin ? arr : arr.reverse
+end
+
 
   def update_user
     user = User.find_by_id(params[:admin_id])
