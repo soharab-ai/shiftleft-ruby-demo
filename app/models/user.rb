@@ -38,15 +38,34 @@ class User < ApplicationRecord
 
   private
 
-  def self.authenticate(email, password)
-    auth = nil
-    user = find_by_email(email)
-    raise "#{email} doesn't exist!" if !(user)
-    if user.password == Digest::MD5.hexdigest(password)
-      auth = user
-    else
-      raise "Incorrect Password!"
-    end
+def self.authenticate(email, password)
+  auth = nil
+  user = find_by_email(email&.to_s&.strip&.downcase)
+  # Return nil instead of raising an exception to prevent user enumeration
+  return auth if user.nil?
+  
+  # Use secure comparison to prevent timing attacks
+  if user.password_digest && BCrypt::Password.new(user.password_digest) == password
+    # Regenerate auth token on each successful authentication for token rotation
+    user.regenerate_auth_token
+    auth = user
+  end
+  
+  return auth
+end
+
+# Generate a new authentication token
+def regenerate_auth_token
+  update(auth_token: SecureRandom.urlsafe_base64(32))
+end
+
+# Create a user context fingerprint
+def create_fingerprint(request)
+  # Combine IP and user agent to create a context fingerprint
+  fingerprint_data = "#{request.remote_ip}|#{request.user_agent}"
+  Digest::SHA256.hexdigest(fingerprint_data)
+end
+
     return auth
   end
 
