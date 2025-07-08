@@ -23,25 +23,48 @@ class UsersController < ApplicationController
     @user = current_user
   end
 
-  def update
-    message = false
+def update
+  message = false
 
-    user = User.where("id = '#{params[:user][:id]}'")[0]
+  # Implementing Strong Parameters with type constraints for better security
+  begin
+    # Use tap to enforce integer type constraint
+    user_id = user_id_params[:id]
+    # Use ORM-level protection with where method for stronger typing
+    user = User.where(id: user_id).first
+  rescue ActionController::ParameterMissing, TypeError => e
+    # Enhanced error handling with specific error types
+    logger.warn "Parameter validation failed: #{e.message}"
+    flash[:error] = "Invalid request parameters"
+    redirect_to user_account_settings_path(user_id: current_user.id)
+    return
+  end
 
-    if user
-      user.update(user_params_without_password)
-      if params[:user][:password].present? && (params[:user][:password] == params[:user][:password_confirmation])
-        user.password = params[:user][:password]
-      end
-      message = true if user.save!
-      respond_to do |format|
-        format.html { redirect_to user_account_settings_path(user_id: current_user.id) }
-        format.json { render json: {msg: message ? "success" : "false "} }
-      end
-    else
-      flash[:error] = "Could not update user!"
-      redirect_to user_account_settings_path(user_id: current_user.id)
+  if user
+    user.update(user_params_without_password)
+    if params[:user][:password].present? && (params[:user][:password] == params[:user][:password_confirmation])
+      user.password = params[:user][:password]
     end
+    message = true if user.save!
+    respond_to do |format|
+      format.html { redirect_to user_account_settings_path(user_id: current_user.id) }
+      format.json { render json: {msg: message ? "success" : "false"} }
+    end
+  else
+    flash[:error] = "Could not update user!"
+    redirect_to user_account_settings_path(user_id: current_user.id)
+  end
+end
+
+private
+
+# Strong Parameters with type constraints as suggested in mitigation notes
+def user_id_params
+  params.require(:user).permit(:id).tap do |whitelisted|
+    whitelisted[:id] = whitelisted[:id].to_i if whitelisted[:id].present?
+  end
+end
+
   end
 
   private
