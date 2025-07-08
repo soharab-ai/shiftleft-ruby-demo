@@ -26,15 +26,28 @@ class PasswordResetsController < ApplicationController
     end
   end
 
-  def send_forgot_password
-    @user = User.find_by_email(params[:email]) unless params[:email].nil?
-
-    if @user && password_reset_mailer(@user)
-      flash[:success] = "Password reset email sent to #{params[:email]}"
-      redirect_to :login
-    else
-      flash[:error] = "There was an issue sending password reset email to #{params[:email]}".html_safe unless params[:email].nil?
+def send_forgot_password
+  @user = User.find_by_email(params[:email]) unless params[:email].nil?
+  
+  # Added email format validation before processing
+  if params[:email].present? && !params[:email].match?(/\A[^@\s]+@[^@\s]+\z/)
+    flash[:error] = "Invalid email format provided"
+    return
+  end
+  
+  if @user && password_reset_mailer(@user)
+    # Applied explicit HTML encoding for user input in success message
+    flash[:success] = "Password reset email sent to #{ERB::Util.html_escape(params[:email])}"
+    redirect_to :login
+  else
+    # Fixed XSS vulnerability by explicitly encoding user input and using sanitization
+    unless params[:email].nil?
+      sanitized_email = Sanitize.fragment(params[:email])
+      flash[:error] = "There was an issue sending password reset email to #{ERB::Util.html_escape(sanitized_email)}"
     end
+  end
+end
+
   end
 
   private
