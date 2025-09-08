@@ -23,25 +23,56 @@ class UsersController < ApplicationController
     @user = current_user
   end
 
-  def update
+def update
+  # Add authorization check to ensure user can only modify their own account or is an admin
+  unless current_user.admin? || current_user.id.to_s == params[:user][:id].to_s
+    flash[:error] = "Unauthorized access!"
+    return redirect_to root_path
+  end
+
+  begin
+    # Use find instead of find_by for primary keys, which will raise an exception if not found
+    user = User.find(params[:user][:id])
+    
     message = false
-
-    user = User.where("id = '#{params[:user][:id]}'")[0]
-
-    if user
-      user.update(user_params_without_password)
-      if params[:user][:password].present? && (params[:user][:password] == params[:user][:password_confirmation])
+    
+    # Use database transaction to ensure atomicity of updates
+    User.transaction do
+      # Update non-password attributes
+      user.update!(user_params_without_password)
+      
+      # Improve password handling with better validation
+      if params[:user][:password].present?
+        unless params[:user][:password].length >= 8 && params[:user][:password] == params[:user][:password_confirmation]
+          flash[:error] = "Password must be at least 8 characters and match confirmation"
+          raise ActiveRecord::Rollback
+        end
         user.password = params[:user][:password]
+        user.save!
       end
-      message = true if user.save!
-      respond_to do |format|
-        format.html { redirect_to user_account_settings_path(user_id: current_user.id) }
-        format.json { render json: {msg: message ? "success" : "false "} }
-      end
-    else
-      flash[:error] = "Could not update user!"
-      redirect_to user_account_settings_path(user_id: current_user.id)
+      
+      message = true
     end
+    
+    respond_to do |format|
+      if message
+        format.html { redirect_to user_account_settings_path(user_id: current_user.id), notice: "User updated successfully." }
+        format.json { render json: {msg: "success"} }
+      else
+        format.html { redirect_to user_account_settings_path(user_id: current_user.id), error: "Could not update user!" }
+        format.json { render json: {msg: "false"} }
+      end
+    end
+    
+  rescue ActiveRecord::RecordNotFound
+    flash[:error] = "User not found!"
+    redirect_to user_account_settings_path(user_id: current_user.id)
+  rescue => e
+    flash[:error] = "Could not update user: #{e.message}"
+    redirect_to user_account_settings_path(user_id: current_user.id)
+  end
+end
+
   end
 
   private
