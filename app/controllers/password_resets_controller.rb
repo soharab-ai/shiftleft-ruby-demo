@@ -53,13 +53,32 @@ end
     end
   end
 
-  def send_forgot_password
-    @user = User.find_by_email(params[:email]) unless params[:email].nil?
+def send_forgot_password
+  @user = User.find_by_email(params[:email]) unless params[:email].nil?
 
-    if @user && password_reset_mailer(@user)
-      flash[:success] = "Password reset email sent to #{params[:email]}"
-      redirect_to :login
+  if @user && password_reset_mailer(@user)
+    flash[:success] = "Password reset email sent to #{params[:email]}"
+    redirect_to :login
+  else
+    # Added comprehensive XSS protection using multiple defense layers
+    if params[:email].nil?
+      flash[:error] = "Please provide an email address"
     else
+      # 1. Input validation before displaying error message
+      email = params[:email]
+      email = email.match?(/\A[^@\s]+@[^@\s]+\z/) ? email : "[invalid email format]"
+      
+      # 2. Using Rails' built-in sanitize helper for stronger protection
+      flash[:error] = "There was an issue sending password reset email to #{sanitize(email)}"
+      
+      # 3. Setting security headers to mitigate XSS attacks
+      response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'"
+      response.headers['X-XSS-Protection'] = '1; mode=block'
+      response.headers['X-Content-Type-Options'] = 'nosniff'
+    end
+  end
+end
+
       flash[:error] = "There was an issue sending password reset email to #{params[:email]}".html_safe unless params[:email].nil?
     end
   end
