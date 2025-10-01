@@ -2,18 +2,45 @@
 class PasswordResetsController < ApplicationController
   skip_before_action :authenticated
 
-  def reset_password
-    user = Marshal.load(Base64.decode64(params[:user])) unless params[:user].nil?
+def reset_password
+  # Check rate limiting to prevent brute-force attacks
+  if ResetAttempt.where(ip: request.remote_ip).where('created_at > ?', 1.hour.ago).count > 5
+    flash[:error] = "Too many password reset attempts. Please try again later."
+    return redirect_to :login
+  end
+  
+  # Record this attempt
+  ResetAttempt.create(ip: request.remote_ip, created_at: Time.now)
+  
+  # Find user by token with additional check for token expiration
+  user = User.find_by(reset_token: params[:token]) if params[:token].present?
+  
+  # Verify token is valid and not expired (24 hour limit)
+  if user && user.reset_token_created_at && user.reset_token_created_at > 24.hours.ago &&
+     params[:password] && params[:confirm_password] && params[:password] == params[:confirm_password]
+    
+    # Update password
+    user.password = params[:password]
+    
+    # Invalidate token after use (single-use token)
+    user.reset_token = nil
+    user.reset_token_created_at = nil
+    
+    user.save!
+    flash[:success] = "Your password has been reset please login"
+    redirect_to :login
+  else
+    flash[:error] = "Error resetting your password. Please try again."
+    redirect_to :login
+  end
+end
 
-    if user && params[:password] && params[:confirm_password] && params[:password] == params[:confirm_password]
-      user.password = params[:password]
-      user.save!
-      flash[:success] = "Your password has been reset please login"
-      redirect_to :login
-    else
-      flash[:error] = "Error resetting your password. Please try again."
-      redirect_to :login
-    end
+# Supporting method for secure token generation (would be in the appropriate controller/model)
+def generate_reset_token
+  # Generate cryptographically secure token with sufficient entropy
+  SecureRandom.hex(32)
+end
+
   end
 
   def confirm_token
