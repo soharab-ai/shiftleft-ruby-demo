@@ -23,10 +23,27 @@ class UsersController < ApplicationController
     @user = current_user
   end
 
-  def update
+def update
     message = false
 
-    user = User.where("id = '#{params[:user][:id]}'")[0]
+    # FIXED: Validate and sanitize user ID with explicit type casting
+    begin
+      validated_id = validate_user_id
+      user = User.find_by(id: validated_id)
+    rescue ArgumentError => e
+      flash[:error] = "Invalid request parameters"
+      redirect_to root_path
+      return
+    end
+    
+    # FIXED: Add authorization check to ensure users can only update their own records
+    unless user && (user.id == current_user.id || (current_user.respond_to?(:admin?) && current_user.admin?))
+      # FIXED: Add security audit logging for unauthorized access attempts
+      Rails.logger.warn "Unauthorized update attempt - User: #{current_user&.id}, Target: #{params[:user][:id]}, IP: #{request.remote_ip}"
+      flash[:error] = "Unauthorized access!"
+      redirect_to root_path
+      return
+    end
 
     if user
       user.update(user_params_without_password)
@@ -36,22 +53,16 @@ class UsersController < ApplicationController
       message = true if user.save!
       respond_to do |format|
         format.html { redirect_to user_account_settings_path(user_id: current_user.id) }
-        format.json { render json: {msg: message ? "success" : "false "} }
-      end
-    else
-      flash[:error] = "Could not update user!"
-      redirect_to user_account_settings_path(user_id: current_user.id)
-    end
+def user_params_without_password
+    params.require(:user).permit(:email, :name, :phone, :address)
   end
 
-  private
-
-  def user_params
-    params.require(:user).permit!
+def validate_user_id
+    id = params.dig(:user, :id)
+    raise ArgumentError, "Missing user ID" unless id.present?
+    
+    sanitized_id = id.to_i
+    raise ArgumentError, "Invalid user ID format" if sanitized_id <= 0 || sanitized_id.to_s != id.to_s.strip
+    
+    sanitized_id
   end
-
-  # unpermitted attributes are ignored in production
-  def user_params_without_password
-    params.require(:user).permit(:email, :admin, :first_name, :last_name)
-  end
-end
