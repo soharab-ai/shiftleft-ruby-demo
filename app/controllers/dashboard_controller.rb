@@ -12,14 +12,26 @@ class DashboardController < ApplicationController
     end
   end
 
-  def change_graph
-    self.try(params[:graph])
-
-    if params[:graph] == "bar_graph"
-      render "dashboard/bar_graph"
-    else
-      @user = current_user
-      render "dashboard/pie_charts"
+def change_graph
+    # Define a hash mapping valid input values to their corresponding rendering logic to prevent reflection attacks
+    GRAPH_RENDERERS = {
+      'bar_graph' => -> { render "dashboard/bar_graph" },
+      'pie_charts' => -> { @user = current_user; render "dashboard/pie_charts" }
+    }.freeze
+    
+    graph_type = params[:graph]
+    
+    # Retrieve the renderer lambda from the hash - implicit allow list validation
+    renderer = GRAPH_RENDERERS[graph_type]
+    
+    if renderer.nil?
+      # Use to_s.inspect to sanitize input and prevent log forging attacks
+      Rails.logger.warn("Invalid graph type attempted: #{graph_type.to_s.inspect}")
+      render plain: "Invalid graph type", status: :bad_request
+      return
     end
+    
+    # Execute the safe, pre-defined rendering logic instead of dangerous reflection
+    instance_exec(&renderer)
   end
-end
+
