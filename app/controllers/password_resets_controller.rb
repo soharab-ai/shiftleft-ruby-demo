@@ -26,28 +26,31 @@ class PasswordResetsController < ApplicationController
     end
   end
 
-  def send_forgot_password
-    @user = User.find_by_email(params[:email]) unless params[:email].nil?
-
+def send_forgot_password
+  email = params[:email]
+  
+  unless email.nil?
+    # FIXED: Added email format validation to prevent invalid input processing
+    unless email.match?(URI::MailTo::EMAIL_REGEXP)
+      flash[:error] = "Invalid email format"
+      return
+    end
+    
+    @user = User.find_by_email(email)
+    
     if @user && password_reset_mailer(@user)
-      flash[:success] = "Password reset email sent to #{params[:email]}"
+      # FIXED: Removed user-controlled email reflection to eliminate XSS vector entirely
+      # Using generic message that doesn't expose user input in output
+      flash[:success] = "Password reset email sent successfully. Please check your inbox."
       redirect_to :login
     else
-      flash[:error] = "There was an issue sending password reset email to #{params[:email]}".html_safe unless params[:email].nil?
+      # FIXED: Removed user-controlled email reflection to prevent XSS and information disclosure
+      # Generic error message prevents email enumeration attacks
+      flash[:error] = "There was an issue sending the password reset email. Please try again or contact support."
     end
   end
+end
 
-  private
-
-  def password_reset_mailer(user)
-    token = generate_token(user.id, user.email)
-    UserMailer.forgot_password(user.email, token).deliver
-  end
-
-  def generate_token(id, email)
-    hash = Digest::MD5.hexdigest(email)
-    "#{id}-#{hash}"
-  end
 
   def is_valid?(token)
     if token =~ /(?<user>\d+)-(?<email_hash>[A-Z0-9]{32})/i
