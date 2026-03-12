@@ -23,35 +23,50 @@ class UsersController < ApplicationController
     @user = current_user
   end
 
-  def update
+def update
     message = false
 
-    user = User.where("id = '#{params[:user][:id]}'")[0]
+    # SECURE FIX: Validate that the ID is numeric before processing to prevent SQL injection
+    unless params[:user][:id].to_s.match?(/\A\d+\z/)
+      flash[:error] = "Invalid user ID format"
+      redirect_to root_path and return
+    end
+
+    # SECURE FIX: Use parameterized query with type casting to prevent SQL injection
+    user_id = params[:user][:id].to_i
+    user = User.where(id: user_id).first
 
     if user
-      user.update(user_params_without_password)
-      if params[:user][:password].present? && (params[:user][:password] == params[:user][:password_confirmation])
-        user.password = params[:user][:password]
+      # SECURE FIX: Use database-backed attribute for secure authorization check
+      unless user.id == current_user.id || (current_user.admin == true)
+        flash[:error] = "Unauthorized access!"
+        redirect_to root_path and return
       end
+private
+
+def user_params_without_password
+  # SECURE FIX: Explicit strong parameters definition to prevent mass assignment
+  params.require(:user).permit(:name, :email, :username, :phone)
+end
+
+      # SECURE FIX: Use strong parameters to prevent mass assignment vulnerabilities
+      user.update(user_params_without_password)
+      
+      # SECURE FIX: Use dedicated strong parameters method for password access
+      if password_params[:password].present? && (password_params[:password] == password_params[:password_confirmation])
+        user.password = password_params[:password]
+      end
+      
       message = true if user.save!
       respond_to do |format|
         format.html { redirect_to user_account_settings_path(user_id: current_user.id) }
         format.json { render json: {msg: message ? "success" : "false "} }
-      end
-    else
-      flash[:error] = "Could not update user!"
-      redirect_to user_account_settings_path(user_id: current_user.id)
+def password_params
+  # SECURE FIX: Dedicated strong parameters method for password updates
+  params.require(:user).permit(:password, :password_confirmation)
+end
+
     end
   end
 
-  private
-
-  def user_params
-    params.require(:user).permit!
-  end
-
-  # unpermitted attributes are ignored in production
-  def user_params_without_password
-    params.require(:user).permit(:email, :admin, :first_name, :last_name)
-  end
 end
