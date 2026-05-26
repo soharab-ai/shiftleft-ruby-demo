@@ -38,30 +38,46 @@ class User < ApplicationRecord
 
   private
 
-  def self.authenticate(email, password)
-    auth = nil
+def self.authenticate(email, password)
+    # FIXED: Changed to return nil instead of raising exceptions to prevent user enumeration
     user = find_by_email(email)
-    raise "#{email} doesn't exist!" if !(user)
-    if user.password == Digest::MD5.hexdigest(password)
-      auth = user
-    else
-      raise "Incorrect Password!"
-    end
-    return auth
+    return nil unless user
+    
+    # FIXED: Using bcrypt for secure password comparison instead of MD5
+    return nil unless user.authenticate_password(password)
+    
+    user
   end
 
-  def hash_password
-    if will_save_change_to_password?
-      self.password = Digest::MD5.hexdigest(self.password)
+    return auth
+def authenticate_password(password)
+    # FIXED: Using bcrypt to securely compare passwords instead of MD5
+    BCrypt::Password.new(self.password) == password
+  rescue BCrypt::Errors::InvalidHash
+    false
+  end
+
     end
   end
 
   def generate_token(column)
-    loop do
-      self[column] = Encryption.encrypt_sensitive_value(self.id)
-      break unless User.exists?(column => self[column])
-    end
-
-    self.save!
+def validate_auth_context(user_agent, ip_address)
+    # FIXED: Token binding validation to verify requesting client matches original authenticated session
+    return false if self.auth_token_context.blank?
+    
+    # FIXED: Validate token hasn't expired
+    return false if self.auth_token_expires_at.present? && self.auth_token_expires_at < Time.current
+    
+    # FIXED: Generate context hash from current request and compare
+    current_context = self.class.generate_auth_context(user_agent, ip_address)
+    ActiveSupport::SecurityUtils.secure_compare(self.auth_token_context, current_context)
   end
-end
+
+def self.generate_auth_context(user_agent, ip_address)
+    # FIXED: Create token binding hash using HMAC-SHA256
+    # Truncate IP to first 3 octets for IPv4 to allow some mobility
+    truncated_ip = ip_address.to_s.split('.')[0..2].join('.') rescue ip_address.to_s
+    context_string = "#{user_agent}:#{truncated_ip}"
+    secret_key = Rails.application.secret_key_base
+    OpenSSL::HMAC.hexdigest('SHA256', secret_key, context_string)
+  end
