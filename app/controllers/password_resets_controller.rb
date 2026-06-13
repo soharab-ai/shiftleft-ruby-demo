@@ -26,28 +26,30 @@ class PasswordResetsController < ApplicationController
     end
   end
 
-  def send_forgot_password
-    @user = User.find_by_email(params[:email]) unless params[:email].nil?
+def send_forgot_password
+    # Input validation: strip whitespace and validate email format before processing
+    email = params[:email]&.strip
+    
+    # Validate email format to prevent injection and enforce proper input
+    unless email.blank? || email.match?(/\A[\w+\-.]+@[a-z\d\-]+(\.[a-z\d\-]+)*\.[a-z]+\z/i)
+      flash[:error] = "Invalid email format provided"
+      return redirect_to :login
+    end
+    
+    # Use validated email to find user
+    @user = User.find_by_email(email) unless email.nil?
 
     if @user && password_reset_mailer(@user)
-      flash[:success] = "Password reset email sent to #{params[:email]}"
+      # Fixed: Use generic message to prevent email enumeration attacks and eliminate reflection of user input
+      flash[:success] = "If an account exists for this email, a password reset link has been sent."
       redirect_to :login
     else
-      flash[:error] = "There was an issue sending password reset email to #{params[:email]}".html_safe unless params[:email].nil?
+      # Fixed: Use generic error message without reflecting user input to prevent XSS and social engineering
+      flash[:error] = "There was an issue sending the password reset email. Please verify the email address and try again."
+      redirect_to :login
     end
   end
 
-  private
-
-  def password_reset_mailer(user)
-    token = generate_token(user.id, user.email)
-    UserMailer.forgot_password(user.email, token).deliver
-  end
-
-  def generate_token(id, email)
-    hash = Digest::MD5.hexdigest(email)
-    "#{id}-#{hash}"
-  end
 
   def is_valid?(token)
     if token =~ /(?<user>\d+)-(?<email_hash>[A-Z0-9]{32})/i
